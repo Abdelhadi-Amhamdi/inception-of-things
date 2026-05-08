@@ -1,196 +1,107 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Script: install_docker_k3d.sh
-# Description: Automates installation of Docker, K3d, and common dependencies
-#              on a Linux development VM (supports Debian/Ubuntu, RHEL/CentOS/Fedora, etc.)
-# Author: Assistant
-# Version: 1.0
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
 
-# Helper functions
-info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
+# Install system dependencies
+echo "Installing required system dependencies..."
+apt-get update -y
+apt-get install -y curl ca-certificates gnupg lsb-release wget
 
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
 
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-    exit 1
-}
-
-# Check if running with sudo or as root
-check_privileges() {
-    if [[ $EUID -ne 0 ]]; then
-        error "This script must be run with sudo or as root. Please run: sudo $0"
-    fi
-}
-
-# Detect Linux distribution
-detect_distro() {
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        DISTRO_ID="$ID"
-        DISTRO_VERSION_ID="$VERSION_ID"
-        DISTRO_NAME="$NAME"
-    else
-        error "Cannot detect Linux distribution (/etc/os-release not found)."
-    fi
-
-    info "Detected distribution: $DISTRO_NAME $DISTRO_VERSION_ID"
-}
-
-# Install common dependencies (curl, ca-certificates, gnupg, lsb-release, etc.)
-install_dependencies() {
-    info "Installing required system dependencies..."
-
-    case "$DISTRO_ID" in
-        ubuntu|debian)
-            apt-get update -y
-            apt-get install -y curl ca-certificates gnupg lsb-release wget
-            ;;
-        rhel|centos|fedora|rocky|almalinux)
-            if command -v dnf &>/dev/null; then
-                dnf install -y curl ca-certificates gnupg wget
-            else
-                yum install -y curl ca-certificates gnupg wget
-            fi
-            ;;
-        *)
-            error "Unsupported distribution: $DISTRO_ID. This script supports Debian/Ubuntu and RHEL/CentOS/Fedora families."
-            ;;
-    esac
-}
-
-# Install Docker using the official convenience script (get.docker.com)
-install_docker() {
-    if command -v docker &>/dev/null; then
-        info "Docker is already installed. Skipping Docker installation."
-        return
-    fi
-
-    info "Installing Docker using official script..."
+# Install Docker
+if command -v docker &>/dev/null; then
+    echo "Docker is already installed. Skipping Docker installation."
+else
+    echo "Installing Docker using official script..."
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh
     rm -f get-docker.sh
-
-    # Start and enable Docker service
     systemctl enable docker
     systemctl start docker
+    usermod -aG docker "$SUDO_USER"
+fi
 
-    # Add the user who invoked sudo to docker group (if not root)
-    if [[ -n "$SUDO_USER" ]]; then
-        usermod -aG docker "$SUDO_USER"
-        info "User '$SUDO_USER' added to the 'docker' group."
-        warn "You may need to log out and back in, or run 'newgrp docker' to use Docker without sudo."
-    else
-        warn "Running as root directly. No user added to docker group. Consider adding your user manually."
-    fi
 
-    info "Docker installed successfully."
-}
 
-# Install K3d (latest version)
-install_k3d() {
-    if command -v k3d &>/dev/null; then
-        info "K3d is already installed. Skipping K3d installation."
-        return
-    fi
 
-    info "Installing K3d (latest version)..."
-
-    # Detect architecture
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64)
-            K3D_ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            K3D_ARCH="arm64"
-            ;;
-        *)
-            error "Unsupported architecture: $ARCH. K3d only supports amd64 and arm64."
-            ;;
-    esac
-
-    K3D_URL="https://github.com/k3d-io/k3d/releases/latest/download/k3d-linux-${K3D_ARCH}"
-    curl -fsSL "$K3D_URL" -o /usr/local/bin/k3d
+# Install K3d and kubectl
+if command -v k3d &>/dev/null; then
+    echo "K3d is already installed. Skipping K3d installation."
+else
+    echo "Installing K3d (latest version)..."
+    curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
     chmod +x /usr/local/bin/k3d
+fi
 
-    info "K3d installed successfully: $(k3d version)"
-}
 
-# Optional: Install kubectl (latest stable)
-install_kubectl() {
-    if command -v kubectl &>/dev/null; then
-        info "kubectl is already installed. Skipping."
-        return
-    fi
-
-    info "Installing kubectl (latest stable)..."
-
-    # Download latest stable version
+# Install kubectl
+if command -v kubectl &>/dev/null; then
+    echo "kubectl is already installed. Skipping."
+else
+    echo "Installing kubectl (latest stable)..."
     KUBECTL_URL="https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')/kubectl"
     curl -fsSL "$KUBECTL_URL" -o /usr/local/bin/kubectl
     chmod +x /usr/local/bin/kubectl
+fi
 
-    info "kubectl installed successfully: $(kubectl version --client --short)"
-}
+# Create a K3d cluster
+if k3d cluster list | grep -q "iot"; then
+    echo "K3d cluster 'iot' already exists. Skipping cluster creation."
+else
+    echo "Creating K3d cluster named 'iot'..."
+    k3d cluster create iot
+fi
 
-# Verify installations
-verify_installations() {
-    info "Verifying installations..."
 
-    if command -v docker &>/dev/null; then
-        docker_version=$(docker --version)
-        info "Docker: $docker_version"
-    else
-        warn "Docker command not found. Something went wrong."
-    fi
+# Wait for cluster to be fully ready
+echo "Waiting for cluster to be ready..."
+kubectl wait --for=condition=Ready nodes --all --timeout=300s
 
-    if command -v k3d &>/dev/null; then
-        k3d_version=$(k3d version)
-        info "K3d: $k3d_version"
-    else
-        warn "K3d command not found."
-    fi
+echo "Installing Argo CD..."
+kubectl delete namespace argocd --ignore-not-found
+kubectl create namespace argocd
 
-    if command -v kubectl &>/dev/null; then
-        kubectl_version=$(kubectl version --client --short 2>/dev/null || kubectl version --client)
-        info "kubectl: $kubectl_version"
-    else
-        warn "kubectl not installed (optional)."
-    fi
-}
+# Install Argo CD using the official manifest
+echo "Applying Argo CD installation manifest..."
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.8.4/manifests/install.yaml
+# Wait for Argo CD components to be ready
+echo "Waiting for Argo CD pods to be ready..."
+kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 
-# Main function
-main() {
-    check_privileges
-    detect_distro
-    install_dependencies
-    install_docker
-    install_k3d
+# Get the initial admin password
+echo "Retrieving initial admin password..."
+ARGO_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+echo "Argo CD initial admin password: $ARGO_PASSWORD"
 
-    # Ask user if they want kubectl
-    read -p "Do you want to install kubectl (recommended for K8s interaction)? [Y/n]: " -r INSTALL_KUBECTL
-    if [[ "$INSTALL_KUBECTL" =~ ^[Yy]$ ]] || [[ -z "$INSTALL_KUBECTL" ]]; then
-        install_kubectl
-    else
-        info "Skipping kubectl installation."
-    fi
+# Save password to a file for later reference
+echo "$ARGO_PASSWORD" > argo-password.txt
+echo "Password saved to argo-password.txt"
 
-    verify_installations
 
-    info "All done! Please log out and back in (or run 'newgrp docker') to use Docker without sudo."
-    info "You can now create a K3d cluster: k3d cluster create mycluster"
-}
+# Set up port-forwarding to access Argo CD UI
+echo "Setting up port-forwarding for Argo CD UI..."
+echo "Starting port-forward in background (localhost:8080 -> argocd-server:443)"
+nohup kubectl port-forward svc/argocd-server -n argocd 8080:443 > /dev/null 2>&1 &
+PORT_FORWARD_PID=$!
+echo $PORT_FORWARD_PID > argo-port-forward.pid
+echo "Port-forwarding started with PID: $PORT_FORWARD_PID"
 
-main "$@"
+
+# Display access information
+echo ""
+echo "========================================="
+echo "Argo CD Installation Complete!"
+echo "========================================="
+echo ""
+echo "Access Argo CD UI:"
+echo "  URL: http://localhost:8080"
+echo "  Username: admin"
+echo "  Password: $ARGO_PASSWORD"
+echo ""
+echo "Login using CLI:"
+echo "  argocd login localhost:8080 --username admin --password $ARGO_PASSWORD --insecure"
+echo ""
+echo "To stop port-forwarding:"
+echo "  kill \$(cat argo-port-forward.pid)"
+echo "========================================="
