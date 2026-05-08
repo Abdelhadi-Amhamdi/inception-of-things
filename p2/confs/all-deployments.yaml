@@ -66,7 +66,7 @@ spec:
     spec:
       containers:
       - name: app3
-        image: app3:latest
+        image: app3:aamhamdi
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80
