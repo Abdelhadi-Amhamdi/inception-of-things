@@ -50,7 +50,7 @@ if k3d cluster list | grep -q "iot"; then
     echo "K3d cluster 'iot' already exists. Skipping cluster creation."
 else
     echo "Creating K3d cluster named 'iot'..."
-    k3d cluster create iot
+    k3d cluster create iot -p "80:80@loadbalancer" -p "443:443@loadbalancer"
 fi
 
 
