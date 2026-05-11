@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-
-
-# Install system dependencies
-echo "Installing required system dependencies..."
-apt-get update -y
-apt-get install -y curl ca-certificates gnupg lsb-release wget
-
-
 # Install Docker
 if command -v docker &>/dev/null; then
     echo "Docker is already installed. Skipping Docker installation."
@@ -21,8 +13,6 @@ else
     systemctl start docker
     usermod -aG docker "$SUDO_USER"
 fi
-
-
 
 
 # Install K3d and kubectl
@@ -46,12 +36,39 @@ else
 fi
 
 # Create a K3d cluster
-if k3d cluster list | grep -q "iot"; then
-    echo "K3d cluster 'iot' already exists. Skipping cluster creation."
+if k3d cluster list | grep -q "iot-bonus"; then
+    echo "K3d cluster 'iot-bonus' already exists. Skipping cluster creation."
 else
-    echo "Creating K3d cluster named 'iot'..."
-    k3d cluster create iot
+    echo "Creating K3d cluster named 'iot-bonus'..."
+    k3d cluster create --config k3d-config.yaml
 fi
+
+
+
+if command -v helm &>/dev/null; then
+    echo "Helm is already installed. Skipping Helm installation."
+else
+    echo "Installing Helm (latest version)..."
+
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    sudo ./get_helm.sh
+    rm -f get_helm.sh
+    # Verify installation
+    helm version
+fi
+
+# Add the official stable charts repo
+helm repo add stable https://charts.helm.sh/stable
+
+# Add Bitnami repo (has many useful charts)
+helm repo add bitnami https://charts.bitnami.com/bitnami
+
+# Add GitLab repo (for your bonus project)
+helm repo add gitlab https://charts.gitlab.io/
+
+# Update all repos
+helm repo update
 
 
 # Wait for cluster to be fully ready
@@ -65,6 +82,7 @@ kubectl create namespace argocd
 # Install Argo CD using the official manifest
 echo "Applying Argo CD installation manifest..."
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.8.4/manifests/install.yaml
+
 # Wait for Argo CD components to be ready
 echo "Waiting for Argo CD pods to be ready..."
 kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
@@ -72,21 +90,15 @@ kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 # Get the initial admin password
 echo "Retrieving initial admin password..."
 ARGO_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-echo "Argo CD initial admin password: $ARGO_PASSWORD"
 
-# Save password to a file for later reference
-echo "$ARGO_PASSWORD" > argo-password.txt
-echo "Password saved to argo-password.txt"
+echo "Patching ArgoCD server to run in insecure mode..."
+kubectl -n argocd patch deployment argocd-server \
+  --type='json' \
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--insecure"}]'
+kubectl rollout status deployment/argocd-server -n argocd --timeout=120s
 
 
-# Set up port-forwarding to access Argo CD UI
-echo "Setting up port-forwarding for Argo CD UI..."
-echo "Starting port-forward in background (localhost:8080 -> argocd-server:443)"
-nohup kubectl port-forward svc/argocd-server -n argocd 8080:443 > /dev/null 2>&1 &
-PORT_FORWARD_PID=$!
-echo $PORT_FORWARD_PID > argo-port-forward.pid
-echo "Port-forwarding started with PID: $PORT_FORWARD_PID"
-
+kubectl apply -f argocd-ingress.yaml
 
 # Display access information
 echo ""
@@ -95,7 +107,6 @@ echo "Argo CD Installation Complete!"
 echo "========================================="
 echo ""
 echo "Access Argo CD UI:"
-echo "  URL: https://localhost:8080"
 echo "  Username: admin"
 echo "  Password: $ARGO_PASSWORD"
 echo ""
