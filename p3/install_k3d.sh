@@ -1,14 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-
-
-# Install system dependencies
-echo "Installing required system dependencies..."
-apt-get update -y
-apt-get install -y curl ca-certificates gnupg lsb-release wget
-
-
 # Install Docker
 if command -v docker &>/dev/null; then
     echo "Docker is already installed. Skipping Docker installation."
@@ -21,8 +13,6 @@ else
     systemctl start docker
     usermod -aG docker "$SUDO_USER"
 fi
-
-
 
 
 # Install K3d and kubectl
@@ -46,11 +36,13 @@ else
 fi
 
 # Create a K3d cluster
-if k3d cluster list | grep -q "iot"; then
-    echo "K3d cluster 'iot' already exists. Skipping cluster creation."
+if k3d cluster list | grep -q "iot-p3"; then
+    echo "K3d cluster 'iot-p3' already exists. Skipping cluster creation."
 else
-    echo "Creating K3d cluster named 'iot'..."
-    k3d cluster create iot -p "80:80@loadbalancer" -p "443:443@loadbalancer"
+    echo "Creating K3d cluster named 'iot-p3'..."
+    k3d cluster create iot-p3 \
+    -p "80:80@loadbalancer" \
+    -p "443:443@loadbalancer"
 fi
 
 
@@ -65,6 +57,7 @@ kubectl create namespace argocd
 # Install Argo CD using the official manifest
 echo "Applying Argo CD installation manifest..."
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.8.4/manifests/install.yaml
+
 # Wait for Argo CD components to be ready
 echo "Waiting for Argo CD pods to be ready..."
 kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
@@ -72,21 +65,12 @@ kubectl wait --for=condition=Ready pods --all -n argocd --timeout=300s
 # Get the initial admin password
 echo "Retrieving initial admin password..."
 ARGO_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-echo "Argo CD initial admin password: $ARGO_PASSWORD"
 
-# Save password to a file for later reference
-echo "$ARGO_PASSWORD" > argo-password.txt
-echo "Password saved to argo-password.txt"
-
-
-# Set up port-forwarding to access Argo CD UI
-echo "Setting up port-forwarding for Argo CD UI..."
-echo "Starting port-forward in background (localhost:8080 -> argocd-server:443)"
-nohup kubectl port-forward svc/argocd-server -n argocd 8080:443 > /dev/null 2>&1 &
-PORT_FORWARD_PID=$!
-echo $PORT_FORWARD_PID > argo-port-forward.pid
-echo "Port-forwarding started with PID: $PORT_FORWARD_PID"
-
+echo "Patching ArgoCD server to run in insecure mode..."
+kubectl -n argocd patch deployment argocd-server \
+  --type='json' \
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--insecure"}]'
+kubectl rollout status deployment/argocd-server -n argocd --timeout=120s
 
 # Display access information
 echo ""
@@ -95,12 +79,8 @@ echo "Argo CD Installation Complete!"
 echo "========================================="
 echo ""
 echo "Access Argo CD UI:"
-echo "  URL: http://localhost:8080"
 echo "  Username: admin"
 echo "  Password: $ARGO_PASSWORD"
-echo ""
-echo "Login using CLI:"
-echo "  argocd login localhost:8080 --username admin --password $ARGO_PASSWORD --insecure"
 echo ""
 echo "To stop port-forwarding:"
 echo "  kill \$(cat argo-port-forward.pid)"
