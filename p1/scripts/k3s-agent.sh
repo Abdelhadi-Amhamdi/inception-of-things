@@ -2,6 +2,8 @@
 
 set -e
 
+apt update && apt install -y curl
+
 echo "[INFO] Installing K3s (agent mode)..."
 
 SERVER_IP="192.168.56.110"

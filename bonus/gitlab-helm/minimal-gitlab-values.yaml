@@ -1,0 +1,122 @@
+
+global:
+  edition: ce  # Community Edition (lighter)
+  hosts:
+    domain: localhost  # Access via localhost
+    https: false       # Disable HTTPS for local testing
+    
+  # INGRESS - Disabled for now, we'll use port-forwarding
+  ingress:
+    enabled: false
+    
+# DISABLE resource-heavy components
+certmanager:
+  install: false
+
+nginx-ingress:
+  enabled: false
+
+prometheus:
+  install: false
+
+gitlab-runner:
+  install: false
+
+# REDUCE PostgreSQL resources
+postgresql:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  persistence:
+    size: 2Gi
+
+# REDUCE Redis resources  
+redis:
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m
+  persistence:
+    size: 1Gi
+
+# MINIMAL Gitaly configuration
+gitaly:
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 200m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+  persistence:
+    size: 3Gi
+
+# GITLAB SHELL - minimal configuration
+gitlab-shell:
+  resources:
+    requests:
+      memory: 64Mi
+      cpu: 50m
+    limits:
+      memory: 128Mi
+      cpu: 100m
+
+# MINIMAL WEBSERVICE (Main GitLab UI)
+gitlab:
+  webservice:
+    minReplicas: 1
+    maxReplicas: 1  # Only one instance
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 500m
+    ingress:
+      enabled: false
+    service:
+      type: NodePort
+      nodePort: 32080  # Fixed port for local access
+
+# MINIMAL Sidekiq (background jobs)
+gitlab:
+  sidekiq:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 150m
+      limits:
+        memory: 512Mi
+        cpu: 300m
+
+# MINIMAL Toolbox (backup/migrations)
+gitlab:
+  toolbox:
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+
+# Registry (container registry) - minimal config
+registry:
+  enabled: true
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
+    limits:
+      memory: 256Mi
+      cpu: 200m

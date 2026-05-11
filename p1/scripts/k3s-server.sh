@@ -1,6 +1,8 @@
 #!/bin/sh
 set -e
 
+apt update && apt install -y curl
+
 echo "[INFO] Installing K3s (server mode)..."
 
 if [ -f /usr/local/bin/k3s-uninstall.sh ]; then
