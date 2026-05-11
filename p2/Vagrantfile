@@ -1,26 +1,22 @@
 Vagrant.configure("2") do |config|
-  config.vm.box = "generic/alpine318"
-
-  config.vm.synced_folder ".", "/vagrant", disabled: true
+  config.vm.box = "debian/bookworm64"
 
   config.vm.define "aamhamdiS" do |s|
-    s.vm.hostname = "Server"
+    s.vm.hostname = "aamhamdiS"
     s.vm.network "private_network", ip: "192.168.56.110"
     s.vm.network "forwarded_port", guest: 80, host: 8080
 
     s.vm.provider "virtualbox" do |vb|
       vb.memory = 1024
-      vb.cpus = 2
+      vb.cpus = 1
     end
 
-    # s.vm.provision "shell", path: "scripts/ssh.sh"
     s.vm.provision "shell", path: "scripts/k3s-server.sh"
-    s.vm.provision "file", source: "./confs", destination: "/home/vagrant/confs"
     s.vm.provision "shell", inline: <<-SHELL
 
-      apk update
-      apk add docker docker-cli-compose
-      rc-update add docker boot
+      apt update
+      apt install -y docker.io docker-compose
+      systemctl enable docker
       service docker start
 
       # Wait for Docker socket to be ready
@@ -43,13 +39,13 @@ Vagrant.configure("2") do |config|
       # Build images using k3s's containerd
       echo "Building app images..."
 
-      cd /home/vagrant/confs/app1
+      cd /vagrant/confs/app1
       docker build -t app1:aamhamdi .
       
-      cd /home/vagrant/confs/app2
+      cd /vagrant/confs/app2
       docker build -t app2:aamhamdi .
       
-      cd /home/vagrant/confs/app3
+      cd /vagrant/confs/app3
       docker build -t app3:aamhamdi .
       
       # Verify images exist
@@ -61,9 +57,9 @@ Vagrant.configure("2") do |config|
       docker save app3:aamhamdi | sudo k3s ctr images import -
       
       # Apply all manifests
-      kubectl apply -f /home/vagrant/confs
+      kubectl apply -f /vagrant/confs
       echo "Applications deployed successfully!"
-  
+
     SHELL
   end
 
